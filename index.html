@@ -1,0 +1,365 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Expense Tracker — LocalStorage</title>
+  <style>
+    :root{--bg:#0f172a;--card:#0b1320;--muted:#94a3b8;--accent:#06b6d4;--accent-2:#8b5cf6;--glass: rgba(255,255,255,0.03)}
+    *{box-sizing:border-box;font-family:Inter,ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,'Helvetica Neue',Arial}
+    body{margin:0;background:linear-gradient(180deg,#071029 0%, #071a2b 100%);color:#e6eef6;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:28px}
+    .app{width:980px;max-width:100%;display:grid;grid-template-columns:360px 1fr;gap:20px}
+    .card{background:var(--card);padding:18px;border-radius:14px;box-shadow:0 6px 24px rgba(2,6,23,0.6);}
+    h1{margin:0 0 8px;font-size:20px}
+    label{display:block;font-size:13px;color:var(--muted);margin-top:12px}
+    input,select,textarea{width:100%;padding:10px;border-radius:8px;border:1px solid rgba(255,255,255,0.04);background:transparent;color:inherit}
+    .muted{color:var(--muted);font-size:13px}
+    .flex{display:flex;gap:10px;align-items:center}
+    .btn{padding:8px 12px;border-radius:10px;border:none;cursor:pointer}
+    .btn-primary{background:linear-gradient(90deg,var(--accent),var(--accent-2));color:#041124}
+    .btn-ghost{background:transparent;border:1px solid rgba(255,255,255,0.04);color:var(--muted)}
+    .summary{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:12px}
+    .tile{background:var(--glass);padding:12px;border-radius:10px}
+    .list{margin-top:14px;max-height:520px;overflow:auto}
+    .row{display:flex;justify-content:space-between;padding:10px;border-radius:8px;margin-bottom:8px;background:linear-gradient(180deg, rgba(255,255,255,0.01), rgba(255,255,255,0.005));align-items:center}
+    .small{font-size:13px;color:var(--muted)}
+    .actions button{margin-left:8px}
+    .filters{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
+    .topbar{display:flex;justify-content:space-between;align-items:center}
+    .csvfile{display:none}
+    footer{margin-top:10px;color:var(--muted);font-size:13px}
+    @media (max-width:900px){.app{grid-template-columns:1fr;}}
+  </style>
+</head>
+<body>
+  <div class="app">
+    <div class="card">
+      <div class="topbar">
+        <div>
+          <h1>Expense Tracker</h1>
+          <div class="muted">All data stored locally in your browser (localStorage)</div>
+        </div>
+        <div>
+          <button id="exportBtn" class="btn btn-ghost">Export CSV</button>
+          <button id="importBtn" class="btn btn-ghost">Import</button>
+          <input id="importFile" type="file" accept="application/json" class="csvfile">
+        </div>
+      </div>
+
+      <form id="expenseForm" style="margin-top:14px">
+        <input type="hidden" id="expenseId">
+        <label>Title</label>
+        <input id="title" required placeholder="e.g. Coffee or Ride share">
+
+        <div style="display:flex;gap:8px;margin-top:8px">
+          <div style="flex:1">
+            <label>Amount</label>
+            <input id="amount" type="number" step="0.01" required placeholder="e.g. 4.50">
+          </div>
+          <div style="width:140px">
+            <label>Type</label>
+            <select id="type">
+              <option value="expense">Expense</option>
+              <option value="income">Income</option>
+            </select>
+          </div>
+        </div>
+
+        <label>Date</label>
+        <input id="date" type="date" required>
+
+        <label>Category</label>
+        <select id="category">
+          <option>Food</option>
+          <option>Transport</option>
+          <option>Shopping</option>
+          <option>Health</option>
+          <option>Salary</option>
+          <option>Other</option>
+        </select>
+
+        <label>Note (optional)</label>
+        <textarea id="note" rows="2" placeholder="Any details..."></textarea>
+
+        <div style="display:flex;gap:8px;margin-top:12px">
+          <button type="submit" class="btn btn-primary">Save</button>
+          <button type="button" id="resetBtn" class="btn btn-ghost">Reset</button>
+          <button type="button" id="clearAll" class="btn btn-ghost">Clear All</button>
+        </div>
+      </form>
+
+      <div class="summary">
+        <div class="tile">
+          <div class="small">Balance</div>
+          <div id="balance" style="font-weight:700;font-size:18px;margin-top:6px">₹0.00</div>
+        </div>
+        <div class="tile">
+          <div class="small">This month</div>
+          <div id="monthTotal" style="font-weight:700;font-size:18px;margin-top:6px">₹0.00</div>
+        </div>
+      </div>
+
+      <div style="margin-top:12px" class="filters">
+        <select id="filterCategory"><option value="all">All categories</option></select>
+        <input id="fromDate" type="date">
+        <input id="toDate" type="date">
+        <button id="applyFilter" class="btn btn-ghost">Apply</button>
+        <button id="clearFilter" class="btn btn-ghost">Clear</button>
+      </div>
+
+      <footer>Tip: Press any Save to add an entry. Edit or Delete from the list.</footer>
+    </div>
+
+    <div class="card">
+      <h1>Transactions</h1>
+      <div class="muted">Recent items (click Edit to modify)</div>
+      <div id="transactions" class="list"></div>
+    </div>
+  </div>
+
+  <script>
+    // LocalStorage key
+    const LS_KEY = 'expenses_v1_aydin';
+
+    // DOM
+    const expenseForm = document.getElementById('expenseForm');
+    const titleIn = document.getElementById('title');
+    const amountIn = document.getElementById('amount');
+    const typeIn = document.getElementById('type');
+    const dateIn = document.getElementById('date');
+    const categoryIn = document.getElementById('category');
+    const noteIn = document.getElementById('note');
+    const expenseIdIn = document.getElementById('expenseId');
+    const transactionsEl = document.getElementById('transactions');
+    const balanceEl = document.getElementById('balance');
+    const monthTotalEl = document.getElementById('monthTotal');
+    const filterCategory = document.getElementById('filterCategory');
+    const fromDateIn = document.getElementById('fromDate');
+    const toDateIn = document.getElementById('toDate');
+    const applyFilterBtn = document.getElementById('applyFilter');
+    const clearFilterBtn = document.getElementById('clearFilter');
+    const resetBtn = document.getElementById('resetBtn');
+    const clearAllBtn = document.getElementById('clearAll');
+    const exportBtn = document.getElementById('exportBtn');
+    const importBtn = document.getElementById('importBtn');
+    const importFile = document.getElementById('importFile');
+
+    // state
+    let expenses = loadExpenses();
+
+    // init
+    populateCategoryFilter();
+    render();
+    setDefaultDate();
+
+    // helpers
+    function uid() { return 'e_' + Date.now() + '_' + Math.floor(Math.random()*9999); }
+
+    function loadExpenses(){
+      try{
+        const raw = localStorage.getItem(LS_KEY);
+        return raw ? JSON.parse(raw) : [];
+      }catch(e){console.error('Failed to load', e); return [];}
+    }
+
+    function saveExpenses(){
+      localStorage.setItem(LS_KEY, JSON.stringify(expenses));
+    }
+
+    function setDefaultDate(){
+      const today = new Date().toISOString().slice(0,10);
+      dateIn.value = today;
+    }
+
+    function populateCategoryFilter(){
+      const categories = Array.from(new Set(expenses.map(e=>e.category).concat(['Food','Transport','Shopping','Health','Salary','Other'])));
+      filterCategory.innerHTML = '<option value="all">All categories</option>' + categories.map(c=>`<option>${c}</option>`).join('');
+    }
+
+    function currency(n){
+      const sign = n<0 ? '-' : '';
+      const v = Math.abs(n).toFixed(2);
+      return sign + '₹' + v;
+    }
+
+    function render(){
+      // transactions list
+      const filtered = applyCurrentFilter(expenses.slice().sort((a,b)=>b.date.localeCompare(a.date)));
+      transactionsEl.innerHTML = filtered.map(tx => {
+        return `
+          <div class="row">
+            <div style="max-width:65%">
+              <div style="font-weight:600">${escapeHtml(tx.title)}</div>
+              <div class="small">${tx.date} • ${escapeHtml(tx.category)} ${tx.note? '• ' + escapeHtml(tx.note):''}</div>
+            </div>
+            <div style="text-align:right">
+              <div style="font-weight:700">${tx.type === 'expense' ? '-' : '+'}${currency(tx.amount)}</div>
+              <div class="actions small">
+                <button class="btn btn-ghost" onclick="editExpense('${tx.id}')">Edit</button>
+                <button class="btn btn-ghost" onclick="deleteExpense('${tx.id}')">Delete</button>
+              </div>
+            </div>
+          </div>
+        `;
+      }).join('') || '<div class="muted" style="padding:12px">No transactions yet</div>';
+
+      // totals
+      const balance = expenses.reduce((s,e)=> s + (e.type==='expense'? -1:1) * Number(e.amount), 0);
+      balanceEl.textContent = currency(balance);
+
+      // this month total
+      const now = new Date();
+      const mm = String(now.getMonth()+1).padStart(2,'0');
+      const yyyy = now.getFullYear();
+      const monthStr = `${yyyy}-${mm}`;
+      const monthTotal = expenses.filter(e => e.date.startsWith(monthStr)).reduce((s,e)=> s + (e.type==='expense'? -1:1)*Number(e.amount), 0);
+      monthTotalEl.textContent = currency(monthTotal);
+
+      populateCategoryFilter();
+      saveExpenses();
+    }
+
+    function escapeHtml(text){
+      if(!text) return '';
+      return text.replace(/[&<>"']/g, function(m){ return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":"&#39;"})[m]; });
+    }
+
+    function applyCurrentFilter(list){
+      const cat = filterCategory.value || 'all';
+      const from = fromDateIn.value;
+      const to = toDateIn.value;
+      return list.filter(item => {
+        if(cat !== 'all' && item.category !== cat) return false;
+        if(from && item.date < from) return false;
+        if(to && item.date > to) return false;
+        return true;
+      });
+    }
+
+    // CRUD
+    expenseForm.addEventListener('submit', e => {
+      e.preventDefault();
+      const id = expenseIdIn.value;
+      const payload = {
+        id: id || uid(),
+        title: titleIn.value.trim() || 'Untitled',
+        amount: Number(amountIn.value) || 0,
+        type: typeIn.value,
+        date: dateIn.value,
+        category: categoryIn.value,
+        note: noteIn.value.trim()
+      };
+
+      if(id){
+        const idx = expenses.findIndex(x => x.id === id);
+        if(idx>=0) expenses[idx] = payload;
+      } else {
+        expenses.push(payload);
+      }
+
+      expenseForm.reset();
+      expenseIdIn.value = '';
+      setDefaultDate();
+      render();
+      syncToGoogleSheets(payload);
+
+    });
+
+    window.editExpense = function(id){
+      const tx = expenses.find(x=>x.id===id);
+      if(!tx) return alert('Item not found');
+      expenseIdIn.value = tx.id;
+      titleIn.value = tx.title;
+      amountIn.value = tx.amount;
+      typeIn.value = tx.type;
+      dateIn.value = tx.date;
+      categoryIn.value = tx.category;
+      noteIn.value = tx.note;
+      window.scrollTo({top:0,behavior:'smooth'});
+    }
+
+    window.deleteExpense = function(id){
+      if(!confirm('Delete this entry?')) return;
+      expenses = expenses.filter(x=>x.id!==id);
+      render();
+    }
+
+    resetBtn.addEventListener('click', ()=>{ expenseForm.reset(); expenseIdIn.value=''; setDefaultDate(); });
+
+    clearAllBtn.addEventListener('click', ()=>{
+      if(!confirm('Clear ALL saved data? This cannot be undone.')) return;
+      expenses = [];
+      saveExpenses();
+      render();
+    });
+
+    applyFilterBtn.addEventListener('click', ()=>{ render(); });
+    clearFilterBtn.addEventListener('click', ()=>{ filterCategory.value='all'; fromDateIn.value=''; toDateIn.value=''; render(); });
+
+    // export CSV
+    exportBtn.addEventListener('click', ()=>{
+      if(!expenses.length){ alert('No data to export'); return; }
+      const rows = [['id','title','amount','type','date','category','note']];
+      expenses.forEach(e=> rows.push([e.id, e.title, e.amount, e.type, e.date, e.category, e.note]));
+      const csv = rows.map(r=> r.map(c=> '"'+String(c).replace(/"/g,'""')+'"').join(',')).join('\n');
+      const blob = new Blob([csv], {type:'text/csv'});
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a'); a.href = url; a.download = 'expenses.csv'; a.click(); URL.revokeObjectURL(url);
+    });
+
+    // import JSON
+    importBtn.addEventListener('click', ()=> importFile.click());
+    importFile.addEventListener('change', async (ev)=>{
+      const f = ev.target.files[0]; if(!f) return;
+      try{
+        const text = await f.text();
+        const parsed = JSON.parse(text);
+        if(!Array.isArray(parsed)) return alert('Invalid file: expected JSON array');
+        // merge, avoid id collisions
+        const existingIds = new Set(expenses.map(e=>e.id));
+        const toAdd = parsed.map(p => ({
+          id: p.id && !existingIds.has(p.id) ? p.id : uid(),
+          title: p.title || 'Imported',
+          amount: Number(p.amount) || 0,
+          type: p.type === 'income' ? 'income' : 'expense',
+          date: p.date || new Date().toISOString().slice(0,10),
+          category: p.category || 'Imported',
+          note: p.note || ''
+        }));
+        expenses = expenses.concat(toAdd);
+        render();
+        alert('Imported ' + toAdd.length + ' items');
+      }catch(err){alert('Failed to import: ' + err.message)}
+      importFile.value = '';
+    });
+
+    // utility: load sample data if none (helpful first time)
+    if(expenses.length === 0){
+      const demo = [
+        {id:uid(), title:'Salary', amount:2500, type:'income', date:new Date().toISOString().slice(0,10), category:'Salary', note:'Monthly'},
+        {id:uid(), title:'Groceries', amount:120.5, type:'expense', date:new Date().toISOString().slice(0,10), category:'Food', note:''}
+      ];
+      expenses = demo;
+      saveExpenses();
+      render();
+    }
+// --- GOOGLE SHEETS SYNC ---
+const GOOGLE_SHEET_WEBAPP_URL = "https://script.google.com/macros/s/AKfycbzjvw54US01L5yZTJSlsEXIm6MDG9E4t28I39DZXLARa6LjRndRdK9IJ8supCWQadaNuw/exec";
+
+async function syncToGoogleSheets(entry) {
+  try {
+    const res = await fetch(GOOGLE_SHEET_WEBAPP_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(entry)
+    });
+    const txt = await res.text();
+    console.log("Google Sheets response:", txt);
+  } catch (err) {
+    console.error("Error syncing to Google Sheets:", err);
+  }
+}
+
+  </script>
+</body>
+</html>
